@@ -1,0 +1,23 @@
+[project]
+name = "wsdc-mcp"
+version = "1.0.0"
+description = "MCP server for the West Coast Swing WSDC Points Registry: dancer points, divisions, level-ups, event results and rules."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [{ name = "Andrew Karakotov" }]
+keywords = ["mcp", "model-context-protocol", "wsdc", "west-coast-swing", "wcs", "dance", "points-registry"]
+dependencies = ["mcp>=2.3,<3", "psycopg[binary]>=3.3", "psycopg-pool>=3.3", "uvicorn>=0.31"]
+
+[project.urls]
+Homepage = "https://wsdcpoints.com"
+Repository = "https://github.com/akarakotov/wsdc-mcp"
+
+[project.scripts]
+wsdc-mcp = "wsdc_mcp.__main__:main"
+
+[tool.setuptools]
+packages = ["wsdc_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
