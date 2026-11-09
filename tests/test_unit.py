@@ -179,59 +179,42 @@ def _http(app):
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://wcspoints.test")
 
 
-def test_web_routes_and_discovery(config):
-    app = create_app(make_config(registry_auth="v=MCPv1; k=ed25519; p=abc"), rules=RulesIndex(SAMPLE_RULES, "2026.1B"))
-
+def _get_all(app, paths, **headers):
     async def run():
         async with _http(app) as http:
-            return {p: await http.get(p) for p in [
-                "/", "/llms.txt", "/robots.txt", "/sitemap.xml", "/privacy", "/icon.svg", "/health",
-                "/mcp/server-card", "/.well-known/mcp/server-card.json", "/.well-known/ai-catalog.json",
-                "/.well-known/mcp-registry-auth",
-            ]}
+            return {p: await http.get(p, headers=headers) for p in paths}
 
-    r = asyncio.run(run())
+    return asyncio.run(run())
+
+
+def test_discovery_documents(config):
+    app = create_app(make_config(registry_auth="v=MCPv1; k=ed25519; p=abc"), rules=RulesIndex(SAMPLE_RULES, "2026.1B"))
+    r = _get_all(app, [
+        "/health", "/mcp/server-card", "/.well-known/mcp/server-card.json", "/.well-known/ai-catalog.json",
+        "/.well-known/mcp-registry-auth", "/icon.svg",
+    ])
     assert all(resp.status_code == 200 for resp in r.values()), {p: x.status_code for p, x in r.items()}
-    landing = r["/"].text
-    assert "<title>WSDC Points MCP Server" in landing
-    assert 'rel="canonical" href="https://wcspoints.test/"' in landing
-    assert '"@type": "FAQPage"' in landing and "search_wsdc_rules" in landing
-    assert "https://wcspoints.test/mcp" in r["/llms.txt"].text
     card = r["/mcp/server-card"].json()
     assert r["/mcp/server-card"].headers["content-type"].startswith("application/mcp-server-card+json")
     assert card["remotes"][0] == {**card["remotes"][0], "type": "streamable-http", "url": "https://wcspoints.test/mcp"}
     assert card["$schema"].endswith("/schemas/v1/server-card.schema.json")
+    assert r["/.well-known/mcp/server-card.json"].json() == card
     catalog = r["/.well-known/ai-catalog.json"].json()
     assert catalog["entries"][0]["url"] == "https://wcspoints.test/mcp/server-card"
     assert r["/.well-known/mcp-registry-auth"].text == "v=MCPv1; k=ed25519; p=abc"
 
 
-def test_indexnow_key_file():
-    app = create_app(make_config(indexnow_key="0123456789abcdef0123456789abcdef"))
-
-    async def run():
-        async with _http(app) as http:
-            return await http.get("/0123456789abcdef0123456789abcdef.txt"), await http.get("/nope.txt")
-
-    hit, miss = asyncio.run(run())
-    assert hit.status_code == 200 and hit.text == "0123456789abcdef0123456789abcdef"
-    assert miss.status_code == 404
-
-
 def test_registry_auth_absent_is_404(config):
-    app = create_app(config)
+    assert _get_all(create_app(config), ["/.well-known/mcp-registry-auth"])["/.well-known/mcp-registry-auth"].status_code == 404
 
-    async def run():
-        async with _http(app) as http:
-            return await http.get("/.well-known/mcp-registry-auth")
 
-    assert asyncio.run(run()).status_code == 404
+def test_mcp_only_app_serves_no_website(config):
+    r = _get_all(create_app(config), ["/", "/sitemap.xml", "/dancer/421"])
+    assert all(resp.status_code == 404 for resp in r.values()), {p: x.status_code for p, x in r.items()}
 
 
 def test_get_on_mcp_endpoint_does_not_hang(config):
-    app = create_app(config)
-
-    async def run():
+    async def run(app):
         async with _http(app) as http:
             plain = await asyncio.wait_for(http.get("/mcp", headers={"Accept": "text/event-stream"}), 5)
             browser = await asyncio.wait_for(http.get("/mcp", headers={"Accept": "text/html"}), 5)
@@ -242,22 +225,35 @@ def test_get_on_mcp_endpoint_does_not_hang(config):
             )
             return plain, browser, preflight
 
-    plain, browser, preflight = asyncio.run(run())
+    plain, browser, preflight = asyncio.run(run(create_app(config)))
     assert plain.status_code == 405 and "POST" in plain.headers["allow"]
-    assert browser.status_code == 302 and browser.headers["location"] == "/#connect"
+    assert browser.status_code == 405
     assert preflight.status_code == 200 and preflight.headers["access-control-allow-origin"] == "*"
+    _, browser, _ = asyncio.run(run(create_app(config, browser_url="/#connect")))
+    assert browser.status_code == 302 and browser.headers["location"] == "/#connect"
 
 
-def test_static_assets_served(config):
-    app = create_app(config)
+def test_extensions_mount_extra_routes(config):
+    from starlette.responses import PlainTextResponse
 
-    async def run():
-        async with _http(app) as http:
-            return {p: await http.get(p) for p in ["/icon.png", "/icon-512.png", "/og.jpg"]}
+    seen = []
 
-    for path, resp in asyncio.run(run()).items():
-        assert resp.status_code == 200, path
-        assert resp.content[:4] in (b"\x89PNG", b"\xff\xd8\xff\xe0", b"\xff\xd8\xff\xe1", b"\xff\xd8\xff\xdb"), path
+    def extension(mcp, cfg, db, rules):
+        seen.append((cfg, db, rules))
+
+        async def hello(request):
+            return PlainTextResponse("hi")
+
+        mcp.custom_route("/hello", methods=["GET"])(hello)
+
+    app = create_app(config, extensions=[extension])
+    assert seen == [(config, None, None)]
+    assert _get_all(app, ["/hello"])["/hello"].text == "hi"
+
+
+def test_icons_served(config):
+    for path, resp in _get_all(create_app(config), ["/icon.png", "/icon-512.png"]).items():
+        assert resp.status_code == 200 and resp.content[:4] == b"\x89PNG", path
 
 
 def test_server_json_matches_code():

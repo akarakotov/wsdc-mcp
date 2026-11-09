@@ -25,8 +25,6 @@ def make_config(**overrides) -> Config:
         pool_max_size=2,
         statement_timeout_ms=5000,
         registry_auth=None,
-        indexnow_key=None,
-        contact_email=None,
         repo_url="https://github.com/akarakotov/wsdc-mcp",
         log_level="INFO",
     )
