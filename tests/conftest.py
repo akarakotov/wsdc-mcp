@@ -17,7 +17,7 @@ TEST_DSN = os.environ.get("WSDC_MCP_TEST_DSN")
 def make_config(**overrides) -> Config:
     base = dict(
         db_dsn=None,
-        public_url="https://wsdcpoints.test",
+        public_url="https://wcspoints.test",
         host="127.0.0.1",
         port=8001,
         rules_path=None,
@@ -25,6 +25,7 @@ def make_config(**overrides) -> Config:
         pool_max_size=2,
         statement_timeout_ms=5000,
         registry_auth=None,
+        indexnow_key=None,
         contact_email=None,
         repo_url="https://github.com/akarakotov/wsdc-mcp",
         log_level="INFO",

@@ -30,6 +30,8 @@ class Config:
     statement_timeout_ms: int
     # Body for /.well-known/mcp-registry-auth (MCP Registry HTTP domain proof), if any.
     registry_auth: str | None
+    # IndexNow key (https://www.indexnow.org); served at /<key>.txt when set.
+    indexnow_key: str | None
     # Optional contact address shown on the landing/privacy pages; GitHub issues are always linked.
     contact_email: str | None
     repo_url: str
@@ -48,7 +50,7 @@ def load_config() -> Config:
     rules_path = _env("WSDC_MCP_RULES_PATH")
     return Config(
         db_dsn=_env("WSDC_MCP_DB_DSN") or _env("MCP_DB_DSN"),
-        public_url=(_env("WSDC_MCP_PUBLIC_URL", "https://wsdcpoints.com") or "").rstrip("/"),
+        public_url=(_env("WSDC_MCP_PUBLIC_URL", "https://wcspoints.com") or "").rstrip("/"),
         host=_env("WSDC_MCP_HOST", "127.0.0.1") or "127.0.0.1",
         port=int(_env("WSDC_MCP_PORT", "8001") or "8001"),
         rules_path=Path(rules_path) if rules_path else None,
@@ -56,6 +58,7 @@ def load_config() -> Config:
         pool_max_size=int(_env("WSDC_MCP_POOL_MAX", "3") or "3"),
         statement_timeout_ms=int(_env("WSDC_MCP_STATEMENT_TIMEOUT_MS", "8000") or "8000"),
         registry_auth=_env("WSDC_MCP_REGISTRY_AUTH"),
+        indexnow_key=_env("WSDC_MCP_INDEXNOW_KEY"),
         contact_email=_env("WSDC_MCP_CONTACT_EMAIL"),
         repo_url=(_env("WSDC_MCP_REPO_URL", "https://github.com/akarakotov/wsdc-mcp") or "").rstrip("/"),
         log_level=(_env("WSDC_MCP_LOG_LEVEL", "INFO") or "INFO").upper(),

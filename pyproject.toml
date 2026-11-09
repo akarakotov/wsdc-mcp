@@ -10,7 +10,7 @@ keywords = ["mcp", "model-context-protocol", "wsdc", "west-coast-swing", "wcs", 
 dependencies = ["mcp>=2.3,<3", "psycopg[binary]>=3.3", "psycopg-pool>=3.3", "uvicorn>=0.31"]
 
 [project.urls]
-Homepage = "https://wsdcpoints.com"
+Homepage = "https://wcspoints.com"
 Repository = "https://github.com/akarakotov/wsdc-mcp"
 
 [project.scripts]

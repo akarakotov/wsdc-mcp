@@ -168,6 +168,8 @@ class WebPages:
             ("/.well-known/ai-catalog.json", self.ai_catalog),
             ("/.well-known/mcp-registry-auth", self.registry_auth),
         ]
+        if self.config.indexnow_key:
+            routes.append((f"/{self.config.indexnow_key}.txt", self.indexnow_key))
         for path, handler in routes:
             mcp.custom_route(path, methods=["GET", "HEAD"], include_in_schema=False)(handler)
 
@@ -215,6 +217,9 @@ class WebPages:
         if not self.config.registry_auth:
             return PlainTextResponse("Not found", status_code=404)
         return PlainTextResponse(self.config.registry_auth)
+
+    async def indexnow_key(self, request: Request) -> Response:
+        return PlainTextResponse(self.config.indexnow_key or "")
 
     async def robots(self, request: Request) -> Response:
         body = f"User-agent: *\nAllow: /\n\nSitemap: {self.config.public_url}/sitemap.xml\n"
@@ -284,7 +289,7 @@ competition history). The authoritative copy lives at <a href="https://worldsdc.
 corrections should be requested from the WSDC, and are reflected here after the next sync.
 To ask about this mirror, contact {contact}<a href="{html.escape(c.repo_url)}/issues">open an issue on GitHub</a>.</p>
 """
-        return HTMLResponse(self._page("Privacy policy · WSDC Points MCP", "Privacy policy of the WSDC Points MCP server.", "/privacy", body))
+        return HTMLResponse(self._page("Privacy policy · WCS Points", "Privacy policy of the WSDC Points MCP server.", "/privacy", body))
 
     async def landing(self, request: Request) -> Response:
         c = self.config
@@ -303,7 +308,8 @@ To ask about this mirror, contact {contact}<a href="{html.escape(c.repo_url)}/is
         rules_note = f" (rulebook {html.escape(self.rules.version)})" if self.rules else ""
         body = f"""
 <header class="hero">
-  <img src="/icon.svg" width="56" height="56" alt="">
+  <img src="/icon.svg" width="56" height="56" alt="WCS Points logo">
+  <p class="brand">WCS Points</p>
   <h1>WSDC Points MCP Server</h1>
   <p class="lead">Ask Claude, ChatGPT, Cursor or any AI assistant about West Coast Swing dancers:
   WSDC points, divisions per role, level-ups, event results and the official rules{rules_note}.</p>
@@ -355,7 +361,7 @@ To ask about this mirror, contact {contact}<a href="{html.escape(c.repo_url)}/is
 """
         return HTMLResponse(
             self._page(
-                "WSDC Points MCP Server — West Coast Swing points & divisions for AI assistants",
+                "WSDC Points MCP Server — West Coast Swing points for AI assistants | WCS Points",
                 "Free MCP server for the WSDC Points Registry: look up any West Coast Swing dancer's "
                 "points, division per role, level-ups, event results and WSDC rules from Claude, ChatGPT or Cursor.",
                 "/",
@@ -372,7 +378,7 @@ To ask about this mirror, contact {contact}<a href="{html.escape(c.repo_url)}/is
                 "@context": "https://schema.org",
                 "@type": "SoftwareApplication",
                 "name": "WSDC Points MCP Server",
-                "alternateName": ["WSDC Points MCP", SERVER_NAME],
+                "alternateName": ["WCS Points", "WSDC Points MCP", SERVER_NAME],
                 "applicationCategory": "DeveloperApplication",
                 "applicationSubCategory": "Model Context Protocol server",
                 "operatingSystem": "Any",
@@ -420,7 +426,7 @@ To ask about this mirror, contact {contact}<a href="{html.escape(c.repo_url)}/is
 <meta property="og:title" content="{html.escape(title)}">
 <meta property="og:description" content="{html.escape(description)}">
 <meta property="og:url" content="{html.escape(canonical)}">
-<meta property="og:site_name" content="WSDC Points MCP">
+<meta property="og:site_name" content="WCS Points">
 <meta property="og:image" content="{html.escape(c.public_url)}/og.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -439,6 +445,7 @@ h1 {{ font-size: clamp(28px, 5vw, 40px); line-height:1.15; margin: 12px 0 8px; }
 h2 {{ font-size: 22px; margin: 44px 0 12px; }}
 h3 {{ font-size: 16px; margin: 0 0 8px; }}
 .hero {{ text-align:center; padding-top: 16px; }}
+.brand {{ margin: 8px 0 0; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; color: var(--muted); }}
 .lead {{ font-size: 18px; color: var(--muted); max-width: 680px; margin: 0 auto 20px; }}
 .endpoint {{ display:inline-flex; gap:8px; align-items:center; max-width:100%; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:8px 8px 8px 14px; }}
 .endpoint code {{ overflow-wrap:anywhere; font-size: 15px; }}

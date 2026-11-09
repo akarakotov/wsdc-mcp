@@ -176,7 +176,7 @@ def test_tools_are_titled_read_only_and_structured(config):
 
 
 def _http(app):
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://wsdcpoints.test")
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://wcspoints.test")
 
 
 def test_web_routes_and_discovery(config):
@@ -194,16 +194,28 @@ def test_web_routes_and_discovery(config):
     assert all(resp.status_code == 200 for resp in r.values()), {p: x.status_code for p, x in r.items()}
     landing = r["/"].text
     assert "<title>WSDC Points MCP Server" in landing
-    assert 'rel="canonical" href="https://wsdcpoints.test/"' in landing
+    assert 'rel="canonical" href="https://wcspoints.test/"' in landing
     assert '"@type": "FAQPage"' in landing and "search_wsdc_rules" in landing
-    assert "https://wsdcpoints.test/mcp" in r["/llms.txt"].text
+    assert "https://wcspoints.test/mcp" in r["/llms.txt"].text
     card = r["/mcp/server-card"].json()
     assert r["/mcp/server-card"].headers["content-type"].startswith("application/mcp-server-card+json")
-    assert card["remotes"][0] == {**card["remotes"][0], "type": "streamable-http", "url": "https://wsdcpoints.test/mcp"}
+    assert card["remotes"][0] == {**card["remotes"][0], "type": "streamable-http", "url": "https://wcspoints.test/mcp"}
     assert card["$schema"].endswith("/schemas/v1/server-card.schema.json")
     catalog = r["/.well-known/ai-catalog.json"].json()
-    assert catalog["entries"][0]["url"] == "https://wsdcpoints.test/mcp/server-card"
+    assert catalog["entries"][0]["url"] == "https://wcspoints.test/mcp/server-card"
     assert r["/.well-known/mcp-registry-auth"].text == "v=MCPv1; k=ed25519; p=abc"
+
+
+def test_indexnow_key_file():
+    app = create_app(make_config(indexnow_key="0123456789abcdef0123456789abcdef"))
+
+    async def run():
+        async with _http(app) as http:
+            return await http.get("/0123456789abcdef0123456789abcdef.txt"), await http.get("/nope.txt")
+
+    hit, miss = asyncio.run(run())
+    assert hit.status_code == 200 and hit.text == "0123456789abcdef0123456789abcdef"
+    assert miss.status_code == 404
 
 
 def test_registry_auth_absent_is_404(config):
@@ -258,4 +270,4 @@ def test_server_json_matches_code():
     assert manifest["name"] == SERVER_NAME
     assert manifest["description"] == SERVER_DESCRIPTION
     assert manifest["version"] == __version__
-    assert manifest["remotes"] == [{"type": "streamable-http", "url": "https://wsdcpoints.com/mcp"}]
+    assert manifest["remotes"] == [{"type": "streamable-http", "url": "https://wcspoints.com/mcp"}]

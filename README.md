@@ -1,15 +1,15 @@
 # WSDC Points MCP Server
 
-<!-- mcp-name: com.wsdcpoints/wsdc-points -->
+<!-- mcp-name: com.wcspoints/wsdc-points -->
 
 **Ask Claude, ChatGPT, Cursor or any AI assistant about West Coast Swing dancers' WSDC points,
 divisions, level-ups and competition results.** A free, public, read-only
 [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server for the
 World Swing Dance Council (WSDC) Points Registry: ~27,000 dancers and ~8,000 events.
 
-- **Endpoint:** `https://wsdcpoints.com/mcp` (Streamable HTTP, no API key, no sign-up)
-- **Website:** [wsdcpoints.com](https://wsdcpoints.com) · [llms.txt](https://wsdcpoints.com/llms.txt) · [server card](https://wsdcpoints.com/mcp/server-card)
-- **Official MCP Registry name:** `com.wsdcpoints/wsdc-points`
+- **Endpoint:** `https://wcspoints.com/mcp` (Streamable HTTP, no API key, no sign-up)
+- **Website:** [wcspoints.com](https://wcspoints.com) · [llms.txt](https://wcspoints.com/llms.txt) · [server card](https://wcspoints.com/mcp/server-card)
+- **Official MCP Registry name:** `com.wcspoints/wsdc-points`
 
 > Unofficial project, not affiliated with the World Swing Dance Council. The official registry is at
 > [worldsdc.com/registry](https://worldsdc.com/registry/).
@@ -27,11 +27,11 @@ World Swing Dance Council (WSDC) Points Registry: ~27,000 dancers and ~8,000 eve
 
 | Client | How |
 |---|---|
-| **Claude** (claude.ai, Desktop) | Settings → Connectors → *Add custom connector* → URL `https://wsdcpoints.com/mcp` |
-| **Claude Code** | `claude mcp add --transport http wsdc-points https://wsdcpoints.com/mcp` |
+| **Claude** (claude.ai, Desktop) | Settings → Connectors → *Add custom connector* → URL `https://wcspoints.com/mcp` |
+| **Claude Code** | `claude mcp add --transport http wsdc-points https://wcspoints.com/mcp` |
 | **ChatGPT** | Enable developer mode for apps/connectors, create a connector with the URL above, no authentication |
-| **Cursor / Windsurf** | `{"mcpServers": {"wsdc-points": {"url": "https://wsdcpoints.com/mcp"}}}` |
-| **VS Code (Copilot)** | `.vscode/mcp.json`: `{"servers": {"wsdc-points": {"type": "http", "url": "https://wsdcpoints.com/mcp"}}}` |
+| **Cursor / Windsurf** | `{"mcpServers": {"wsdc-points": {"url": "https://wcspoints.com/mcp"}}}` |
+| **VS Code (Copilot)** | `.vscode/mcp.json`: `{"servers": {"wsdc-points": {"type": "http", "url": "https://wcspoints.com/mcp"}}}` |
 | **Anything else** | Any MCP client with Streamable HTTP transport |
 
 ## Tools
@@ -73,7 +73,7 @@ WSDC_MCP_DB_DSN="dbname=wsdc host=127.0.0.1" venv/bin/python -m wsdc_mcp      # 
 | Variable | Meaning |
 |---|---|
 | `WSDC_MCP_DB_DSN` | PostgreSQL DSN of the WSDC registry database (read-only role) |
-| `WSDC_MCP_PUBLIC_URL` | Public origin used in links and discovery documents (default `https://wsdcpoints.com`) |
+| `WSDC_MCP_PUBLIC_URL` | Public origin used in links and discovery documents (default `https://wcspoints.com`) |
 | `WSDC_MCP_HOST` / `WSDC_MCP_PORT` | Bind address (default `127.0.0.1:8001`) |
 | `WSDC_MCP_RULES_PATH` | Plain-text WSDC rulebook; enables `search_wsdc_rules` |
 | `WSDC_MCP_POOL_MAX`, `WSDC_MCP_STATEMENT_TIMEOUT_MS` | DB pool size (3) and per-query timeout (8000 ms) |
@@ -84,7 +84,7 @@ The server expects the registry schema of the WSDC parser project (`contester_vi
 ## Privacy
 
 No accounts, cookies or trackers. Requests and tool calls are logged for up to 30 days for operations.
-Results contain only what the WSDC publishes in its public registry. See [wsdcpoints.com/privacy](https://wsdcpoints.com/privacy).
+Results contain only what the WSDC publishes in its public registry. See [wcspoints.com/privacy](https://wcspoints.com/privacy).
 
 ## License
 

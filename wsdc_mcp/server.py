@@ -35,8 +35,8 @@ logger = logging.getLogger("wsdc_mcp.tools")
 P = ParamSpec("P")
 T = TypeVar("T")
 
-SERVER_NAME = "com.wsdcpoints/wsdc-points"
-SERVER_TITLE = "WSDC Points"
+SERVER_NAME = "com.wcspoints/wsdc-points"
+SERVER_TITLE = "WCS Points"
 SERVER_DESCRIPTION = (
     "West Coast Swing WSDC points registry: dancer points, divisions, level-ups, event results and rules."
 )
