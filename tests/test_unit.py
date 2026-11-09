@@ -213,6 +213,13 @@ def test_registry_auth_absent_is_404(config):
     assert _get_all(create_app(config), ["/.well-known/mcp-registry-auth"])["/.well-known/mcp-registry-auth"].status_code == 404
 
 
+def test_glama_claim(config):
+    assert _get_all(create_app(config), ["/.well-known/glama.json"])["/.well-known/glama.json"].status_code == 404
+    claimed = _get_all(create_app(make_config(glama_claim="glama_claim_abc")), ["/.well-known/glama.json"])
+    assert claimed["/.well-known/glama.json"].json() == {
+        "$schema": "https://glama.ai/mcp/schemas/connector.json", "claim": "glama_claim_abc"}
+
+
 def test_mcp_only_app_serves_no_website(config):
     r = _get_all(create_app(config), ["/", "/sitemap.xml", "/dancer/421"])
     assert all(resp.status_code == 404 for resp in r.values()), {p: x.status_code for p, x in r.items()}

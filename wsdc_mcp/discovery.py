@@ -71,6 +71,7 @@ class Discovery:
             ("/.well-known/mcp/server-card.json", self.server_card),
             ("/.well-known/ai-catalog.json", self.ai_catalog),
             ("/.well-known/mcp-registry-auth", self.registry_auth),
+            ("/.well-known/glama.json", self.glama_claim),
             ("/icon.svg", self.icon),
             *((path, self.icon_file) for path in ICON_FILES),
         ]
@@ -101,6 +102,12 @@ class Discovery:
         if not self.config.registry_auth:
             return PlainTextResponse("Not found", status_code=404)
         return PlainTextResponse(self.config.registry_auth)
+
+    async def glama_claim(self, request: Request) -> Response:
+        """Glama's proof that whoever owns this domain owns its connectors (glama.ai/mcp/connectors)."""
+        if not self.config.glama_claim:
+            return PlainTextResponse("Not found", status_code=404)
+        return JSONResponse({"$schema": "https://glama.ai/mcp/schemas/connector.json", "claim": self.config.glama_claim})
 
     async def icon(self, request: Request) -> Response:
         return Response(ICON_SVG, media_type="image/svg+xml", headers=LONG_CACHE)

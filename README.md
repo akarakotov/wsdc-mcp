@@ -90,6 +90,7 @@ WSDC_MCP_DB_DSN="dbname=wsdc host=127.0.0.1" venv/bin/python -m wsdc_mcp      # 
 | `WSDC_MCP_HOST` / `WSDC_MCP_PORT` | Bind address (default `127.0.0.1:8001`) |
 | `WSDC_MCP_RULES_PATH` | Plain-text WSDC rulebook; enables `search_wsdc_rules` |
 | `WSDC_MCP_POOL_MAX`, `WSDC_MCP_STATEMENT_TIMEOUT_MS` | DB pool size (3) and per-query timeout (8000 ms) |
+| `WSDC_MCP_GLAMA_CLAIM` | Glama ownership token, served as `/.well-known/glama.json` (claims the domain's connectors on glama.ai) |
 | `WSDC_MCP_USAGE_LOG` | File for the usage log: one JSON line per MCP request (method, tool, results found, client app, status), rotated daily and kept 30 days. Unset: the lines go to the process log |
 
 The server expects the registry schema of the WSDC parser project (`contester_view`,

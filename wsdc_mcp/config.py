@@ -36,6 +36,8 @@ class Config:
     usage_log: Path | None = None
     # A dancer's page on the hosting website, with an {id} placeholder (adds a link to the dancer card).
     dancer_page_url: str | None = None
+    # Glama ownership claim token, served at /.well-known/glama.json (proves the domain is ours).
+    glama_claim: str | None = None
 
     @property
     def mcp_url(self) -> str:
@@ -62,4 +64,5 @@ def load_config() -> Config:
         repo_url=(_env("WSDC_MCP_REPO_URL", "https://github.com/akarakotov/wsdc-mcp") or "").rstrip("/"),
         log_level=(_env("WSDC_MCP_LOG_LEVEL", "INFO") or "INFO").upper(),
         usage_log=Path(usage_log) if usage_log else None,
+        glama_claim=_env("WSDC_MCP_GLAMA_CLAIM"),
     )
