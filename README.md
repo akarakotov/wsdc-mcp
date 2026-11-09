@@ -85,8 +85,7 @@ The server expects the registry schema of the WSDC parser project (`contester_vi
 ## Privacy
 
 No accounts, cookies or trackers. The hosted server at wcspoints.com logs requests and tool calls
-(including the name of the AI app that sent them) for up to 30 days, and keeps usage statistics
-without IP addresses.
+(including the name of the AI app that sent them) and keeps them for usage statistics.
 Results contain only what the WSDC publishes in its public registry. See [wcspoints.com/privacy](https://wcspoints.com/privacy).
 
 ## License
