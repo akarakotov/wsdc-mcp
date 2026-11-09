@@ -854,6 +854,22 @@ async def get_event_history(
         raise NotFound(f"No event in the registry matches '{query}'. Try fewer or different words, or search_events.")
     wanted = " ".join(tokens)
     best = next((m for m in matches if normalize_name_query(m["name"]) == wanted), matches[0])
+    history = await _series_history(db, best["series"], division, places, limit)
+    history.other_series = [m["name"] for m in matches if m is not best][:10]
+    return history
+
+
+@cached(ttl=900)
+async def get_event_series(
+    db: Database, series_id: int, division: str | None = None, places: int = 1, limit: int = 100
+) -> EventHistoryResult:
+    """Every edition of the event series with this WSDC event ID (the website's series pages)."""
+    return await _series_history(db, series_id, normalize_division(division), places, limit)
+
+
+async def _series_history(
+    db: Database, series: int, division: str | None, places: int, limit: int
+) -> EventHistoryResult:
     rows = await db.fetch_all(
         f"""
         SELECT {_EVENT_COLUMNS},
@@ -864,19 +880,21 @@ async def get_event_history(
           AND EXISTS (SELECT 1 FROM entry_view x WHERE x.entry_event = ev.event_id)
         ORDER BY ev.event_start_date DESC NULLS LAST
         """,
-        {"series": best["series"]},
+        {"series": series},
     )
+    if not rows:
+        raise NotFound(f"No event series with ID {series} has results in the registry.")
     shown = rows[:limit]
     placements = await _placements(db, [r["event_id"] for r in shown], division, places)
     return EventHistoryResult(
-        series=best["name"],
-        wsdc_event_id=best["series"] if best["series"] > 0 else None,
+        series=rows[0]["event_name"],
+        wsdc_event_id=series if series > 0 else None,
         editions_total=len(rows),
         editions=[
             EventEdition(event=_event_summary(r, r["results_count"]), divisions=placements.get(r["event_id"], []))
             for r in shown
         ],
-        other_series=[m["name"] for m in matches if m is not best][:10],
+        other_series=[],
     )
 
 
@@ -894,7 +912,7 @@ async def registry_updates(db: Database, days: int, country: str | None, limit: 
         JOIN event ev ON ev.event_id = x.entry_event
         JOIN division d ON d.division_id = x.entry_division
         {_EVENT_JOINS}
-        -- Only recent events: re-imports of the whole registry give old results new timestamps.
+        -- Only events of the last half year: re-imports give old results new timestamps.
         WHERE ev.event_start_date >= %(recent)s
           AND (%(country)s::text IS NULL OR co.country_name = %(country)s)
         GROUP BY ev.event_id, ev.event_name, ev.event_start_date, ev.event_end_date, ev.event_internal_id,
@@ -903,7 +921,7 @@ async def registry_updates(db: Database, days: int, country: str | None, limit: 
         ORDER BY published DESC, ev.event_name
         LIMIT %(limit)s
         """,
-        {"recent": since - timedelta(days=550), "since": since, "country": country_name, "limit": limit},
+        {"recent": since - timedelta(days=180), "since": since, "country": country_name, "limit": limit},
     )
     winners = await _placements(db, [r["event_id"] for r in rows], None, 1)
     updates = []

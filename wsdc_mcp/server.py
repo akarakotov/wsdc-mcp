@@ -192,6 +192,10 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         """Get a dancer's WSDC profile: current division and points per role (Leader/Follower),
         the Jack & Jill divisions they are allowed to enter in each role, points per division,
         level-up timeline, and first/last competition dates.
+
+        Use it for "what division can X dance?" and "how close is X to moving up?"; when only a
+        name is known, call search_dancers first to get the WSDC ID. An unknown ID returns an
+        error that says so (nothing is guessed).
         """
         return await data.get_dancer_profile(need_db(), wsdc_id)
 

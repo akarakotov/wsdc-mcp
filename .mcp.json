@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "wcs-points": {
+      "type": "http",
+      "url": "https://wcspoints.com/mcp?via=repo"
+    }
+  }
+}

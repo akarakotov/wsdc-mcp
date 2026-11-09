@@ -249,7 +249,7 @@ def test_usage_log_names_client_and_tool(config, caplog, mode):
 
     async def run():
         async with app.router.lifespan_context(app), _http(app) as http:
-            transport = streamable_http_client("https://wcspoints.test/mcp", http_client=http)
+            transport = streamable_http_client("https://wcspoints.test/mcp?via=Test", http_client=http)
             info = Implementation(name="test-client", version="9.9")
             async with Client(transport, client_info=info, mode=mode) as client:
                 rules = await client.call_tool("search_wsdc_rules", {"query": "novice points"})
@@ -272,6 +272,7 @@ def test_usage_log_names_client_and_tool(config, caplog, mode):
     else:
         assert all(line.get("client") == "test-client" for line in calls)
     assert all(line["ip"] and line["ts"].endswith("+00:00") and "ms" in line for line in lines)
+    assert all(line["via"] == "test" for line in lines)  # the channel from the connector URL
 
 
 def test_usage_outcome_never_fails_a_tool_call(caplog):
@@ -298,6 +299,13 @@ def test_usage_log_skips_other_requests_and_survives_junk(config, caplog):
     assert len(lines) == 1
     assert lines[0]["method"] == "invalid" and lines[0]["ua"] == "junk/1.0"
     assert lines[0]["status"] == junk.status_code >= 400
+
+
+def test_usage_via_names_the_channel():
+    assert usage.via(b"via=Reddit") == "reddit"
+    assert usage.via(b"x=1&via=claude-directory") == "claude-directory"
+    assert usage.via(b"via=%3Cscript%3E") is None and usage.via(b"") is None
+    assert usage.via(("via=" + "a" * 41).encode()) is None
 
 
 def test_usage_describe_handles_batches_and_garbage():

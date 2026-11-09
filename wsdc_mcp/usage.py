@@ -1,16 +1,22 @@
 """Usage log for the MCP endpoint: one JSON line per POST to /mcp.
 
-Each line records what was asked (the JSON-RPC method; the tool and its arguments for
-tools/call; the prompt or resource for prompts/get, completion/complete and resources/read), who asked (the client app name and version sent with initialize, the User-Agent
-and IP address) and how it went (HTTP status, tool status, duration, and for some tools how
-many results they found or whose profile they returned). Lines go to the
-`wsdc_mcp.usage` logger; `log_to_file` sends them to a file rotated daily at midnight UTC.
+Each line records:
+- what was asked: the JSON-RPC method; the tool and its arguments for tools/call; the prompt or
+  resource for prompts/get, completion/complete and resources/read;
+- who asked: the client app name and version (sent with initialize), the User-Agent, the IP
+  address, and `via`, the channel named in the connector URL (/mcp?via=reddit);
+- how it went: HTTP status, tool status, duration, and for some tools how many results they
+  found or whose profile they returned.
+
+Lines go to the `wsdc_mcp.usage` logger; `log_to_file` sends them to a file rotated daily at
+midnight UTC.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -27,6 +33,9 @@ logger = logging.getLogger("wsdc_mcp.usage")
 MAX_BODY = 64 * 1024
 MAX_ARGS = 300
 MAX_TEXT = 100
+
+# Acquisition channel: a connector URL like /mcp?via=reddit says where the user found the server.
+_VIA = re.compile(r"[A-Za-z0-9_.-]{1,40}")
 
 _noted: ContextVar[dict[str, Any] | None] = ContextVar("wsdc_mcp_usage_noted", default=None)
 
@@ -50,6 +59,15 @@ def _object(value: Any) -> dict[str, Any]:
 # sends its name and protocol version in the _meta of every request.
 CLIENT_INFO_META_KEY = "io.modelcontextprotocol/clientInfo"
 PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion"
+
+
+def via(query_string: bytes) -> str | None:
+    """The `via` parameter of the connector URL, if it is a plain short label."""
+    for part in query_string.decode("latin-1").split("&"):
+        key, _, value = part.partition("=")
+        if key == "via" and _VIA.fullmatch(value):
+            return value.lower()
+    return None
 
 
 def describe(body: bytes) -> dict[str, Any]:
@@ -147,6 +165,7 @@ class UsageLog:
             _noted.reset(token)
             line.update({"method": "too_large"} if too_large else describe(bytes(body)))
             line.setdefault("protocol", _text(headers.get("mcp-protocol-version")))
+            line["via"] = via(scope.get("query_string", b""))
             line.update(status=status, **noted, ms=round((time.perf_counter() - started) * 1000))
             logger.info(json.dumps({k: v for k, v in line.items() if v is not None}, ensure_ascii=False, separators=(",", ":")))
 
