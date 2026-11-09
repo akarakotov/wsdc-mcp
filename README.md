@@ -45,12 +45,25 @@ All tools are read-only (`readOnlyHint: true`) and return structured JSON with a
 | `get_dancer_results` | A dancer's placements: event, date, division, role, placement, points; filters by division, role, year |
 | `search_events` | Find WSDC registry events by name, city, year, country |
 | `get_event_results` | All Jack & Jill placements of one event, by division |
+| `get_jj_partners` | Who a dancer made Jack & Jill finals with: each placement with the partner, and the most frequent partners |
+| `get_event_history` | Every edition of an event series (e.g. each year's US Open) with the winners or top placements per division |
+| `get_registry_updates` | Events whose results were published in the registry in the last days, with the top division's winners |
 | `get_recent_levelups` | Dancers who recently moved up a division, by country and division |
 | `get_division_stats` | Dancer counts by current division and role, worldwide or per country |
 | `search_wsdc_rules` | Search the current WSDC Registry Event Rules (move-up thresholds, points per tier, secondary role rules…) |
 | `get_registry_info` | Data coverage and freshness |
 
 Resource: `wsdc://rules/current`, the full text of the current rulebook.
+
+Prompts (shown as slash commands in clients that support them): `divisions_check` (which divisions a
+dancer may enter), `dancer_story`, `event_story` (an event's winners over the years), `registry_news`
+and `rules_question`. Their `dancer`, `event`, `country` and `division` arguments autocomplete from the
+registry (`completion/complete`).
+
+Interactive card ([MCP Apps](https://modelcontextprotocol.io/extensions/apps)): in hosts that support the
+extension, `get_dancer_profile` renders `ui://wsdc/dancer-card.html`, a card with divisions, points per
+division and level-ups per role, and buttons that ask for the dancer's results or finals partners. Other
+clients get the same structured result as before.
 
 ## How it works
 

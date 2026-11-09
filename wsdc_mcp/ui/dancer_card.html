@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WSDC dancer</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: var(--color-background-primary, #ffffff);
+    --bg2: var(--color-background-secondary, #f4f4f5);
+    --text: var(--color-text-primary, #18181b);
+    --muted: var(--color-text-secondary, #6b6b76);
+    --line: var(--color-border-primary, #e4e4e7);
+    --accent: #c2410c;
+    --bar: #f97316;
+    --radius: var(--border-radius-md, 10px);
+    --font: var(--font-sans, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  }
+  :root[data-theme="dark"] {
+    --bg: var(--color-background-primary, #18181b);
+    --bg2: var(--color-background-secondary, #27272a);
+    --text: var(--color-text-primary, #f4f4f5);
+    --muted: var(--color-text-secondary, #a1a1aa);
+    --line: var(--color-border-primary, #3f3f46);
+    --accent: #fb923c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+  .card { padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .roles { display: grid; gap: 12px; margin-top: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .role { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; background: var(--bg); }
+  .role h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 6px; }
+  .division { font-size: 20px; font-weight: 650; }
+  .division small { font-size: 13px; font-weight: 400; color: var(--muted); }
+  .label { color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { background: var(--bg2); border-radius: 999px; padding: 2px 9px; font-size: 12px; }
+  .chip.top { background: var(--accent); color: #fff; }
+  .bars { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 8px; align-items: center; font-size: 12px; }
+  .track { height: 8px; background: var(--bg2); border-radius: 4px; overflow: hidden; }
+  .fill { height: 100%; background: var(--bar); border-radius: 4px; }
+  .timeline { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; }
+  .timeline span b { font-weight: 600; }
+  .none { color: var(--muted); font-size: 13px; }
+  .note { margin-top: 10px; color: var(--muted); font-size: 12px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  button { font: inherit; font-size: 13px; color: var(--text); background: var(--bg2); border: 1px solid var(--line);
+           border-radius: 8px; padding: 5px 11px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  .status { color: var(--muted); padding: 16px; }
+</style>
+</head>
+<body>
+<div id="root"><div class="status">Loading the dancer…</div></div>
+<script>
+(() => {
+  "use strict";
+  // Link to the dancer's page on the hosting website ("" when the server has none); {id} is replaced.
+  const DANCER_URL = __DANCER_URL__;
+  const SKILL = ["Newcomer", "Novice", "Intermediate", "Advanced", "All-Stars", "Champions"];
+  const root = document.getElementById("root");
+  let nextId = 1;
+  const pending = new Map();
+
+  // MCP Apps: JSON-RPC 2.0 over postMessage with the host (protocol 2026-01-26).
+  const post = (message) => window.parent.postMessage({ jsonrpc: "2.0", ...message }, "*");
+  const notify = (method, params) => post({ method, params: params || {} });
+  const request = (method, params) => new Promise((resolve, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve, reject });
+    post({ id, method, params: params || {} });
+  });
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
+    const m = event.data;
+    if (!m || m.jsonrpc !== "2.0") return;
+    if (m.method === undefined && pending.has(m.id)) {
+      const { resolve, reject } = pending.get(m.id);
+      pending.delete(m.id);
+      m.error ? reject(m.error) : resolve(m.result || {});
+      return;
+    }
+    switch (m.method) {
+      case "ui/notifications/tool-input": showLoading(m.params && m.params.arguments); break;
+      case "ui/notifications/tool-result": render(m.params || {}); break;
+      case "ui/notifications/host-context-changed": applyContext(m.params || {}); break;
+      case "ui/resource-teardown": case "ping": if (m.id !== undefined) post({ id: m.id, result: {} }); break;
+      default: if (m.id !== undefined) post({ id: m.id, error: { code: -32601, message: "Method not found" } });
+    }
+  });
+
+  function applyContext(ctx) {
+    if (ctx.theme) document.documentElement.dataset.theme = ctx.theme;
+    const variables = ctx.styles && ctx.styles.variables;
+    if (variables) for (const [name, value] of Object.entries(variables)) {
+      if (value) document.documentElement.style.setProperty(name, value);
+    }
+  }
+
+  function el(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [key, value] of Object.entries(attrs || {})) {
+      if (key === "class") node.className = value; else if (key === "style") node.style.cssText = value;
+      else if (key.startsWith("on")) node.addEventListener(key.slice(2), value); else node.setAttribute(key, value);
+    }
+    for (const child of children.flat(Infinity)) if (child !== null && child !== undefined && child !== false) {
+      node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+
+  const month = (iso) => (iso ? String(iso).slice(0, 7) : "");
+
+  function showLoading(args) {
+    const id = args && args.wsdc_id;
+    root.replaceChildren(el("div", { class: "status" }, id ? `Loading dancer #${id}…` : "Loading the dancer…"));
+  }
+
+  function roleBlock(role) {
+    if (!role.has_points) {
+      return el("div", { class: "role" }, el("h2", {}, role.role), el("div", { class: "none" }, `No points as ${role.role.toLowerCase()}.`));
+    }
+    const points = role.points_by_division || {};
+    const shown = SKILL.filter((d) => points[d]);
+    const most = Math.max(1, ...shown.map((d) => points[d]));
+    const allowed = role.allowed_divisions || [];
+    return el("div", { class: "role" },
+      el("h2", {}, role.role),
+      el("div", { class: "division" }, role.division || "—", " ", el("small", {}, `${role.division_points || 0} pts`)),
+      allowed.length ? [el("div", { class: "label" }, "Can enter"),
+        el("div", { class: "chips" }, allowed.map((d) => el("span", { class: d === role.division ? "chip top" : "chip" }, d)))] : null,
+      shown.length ? [el("div", { class: "label" }, "Points by division"),
+        el("div", { class: "bars" }, shown.map((d) => [
+          el("span", {}, d),
+          el("div", { class: "track" }, el("div", { class: "fill", style: `width:${Math.round(100 * points[d] / most)}%` })),
+          el("span", {}, points[d]),
+        ]))] : null,
+      (role.levelups || []).length ? [el("div", { class: "label" }, "Level-ups"),
+        el("div", { class: "timeline" }, role.levelups.map((l) => el("span", {}, el("b", {}, l.division), " ", month(l.date))))] : null,
+    );
+  }
+
+  function render(result) {
+    const p = result.structuredContent;
+    if (result.isError || !p || !Array.isArray(p.roles)) {
+      const text = (result.content || []).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+      root.replaceChildren(el("div", { class: "status" }, text || "No dancer to show."));
+      return;
+    }
+    const facts = [`WSDC #${p.wsdc_id}`, p.country, p.primary_role && `${p.primary_role}${p.is_dual_role ? " (dances both roles)" : ""}`,
+      p.first_points && `points ${month(p.first_points)} – ${month(p.last_points)}`].filter(Boolean);
+    const ask = (text) => request("ui/message", { role: "user", content: { type: "text", text } }).catch(() => {});
+    const url = DANCER_URL ? DANCER_URL.replace("{id}", encodeURIComponent(p.wsdc_id)) : "";
+    root.replaceChildren(el("div", { class: "card" },
+      el("h1", {}, p.name),
+      el("div", { class: "meta" }, facts.join(" · ")),
+      el("div", { class: "roles" }, p.roles.map(roleBlock)),
+      p.note ? el("div", { class: "note" }, p.note) : null,
+      el("div", { class: "actions" },
+        el("button", { onclick: () => ask(`Show the competition results of ${p.name} (WSDC #${p.wsdc_id}).`) }, "Results"),
+        el("button", { onclick: () => ask(`Who did ${p.name} (WSDC #${p.wsdc_id}) make Jack & Jill finals with?`) }, "Finals partners"),
+        url ? el("button", { onclick: () => request("ui/open-link", { url }).catch(() => {}) }, "Open page") : null,
+      ),
+    ));
+  }
+
+  new ResizeObserver(() => {
+    const { scrollWidth: width, scrollHeight: height } = document.documentElement;
+    notify("ui/notifications/size-changed", { width, height });
+  }).observe(document.documentElement);
+
+  request("ui/initialize", {
+    protocolVersion: "2026-01-26",
+    appInfo: { name: "wsdc-dancer-card", version: "1.0.0" },
+    appCapabilities: { availableDisplayModes: ["inline"] },
+  }).then((result) => {
+    applyContext(result.hostContext || {});
+    notify("ui/notifications/initialized");
+  }).catch(() => {});
+})();
+</script>
+</body>
+</html>

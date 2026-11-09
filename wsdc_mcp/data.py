@@ -18,18 +18,25 @@ from .models import (
     ALL_DIVISIONS,
     SKILL_DIVISIONS,
     CompetitionResult,
+    DancerPartners,
     DancerProfile,
     DancerResults,
     DancerSummary,
     DivisionCount,
     DivisionResults,
     DivisionStatsResult,
+    EventEdition,
+    EventHistoryResult,
     EventPlacement,
     EventResults,
     EventSummary,
+    FrequentPartner,
     Levelup,
     LevelupEntry,
+    Partnership,
     RecentLevelupsResult,
+    RegistryUpdate,
+    RegistryUpdatesResult,
     RoleStatus,
     SearchDancersResult,
     SearchEventsResult,
@@ -666,3 +673,283 @@ async def data_freshness(db: Database) -> dict[str, Any]:
         "dancers": row["dancers"] if row else None,
         "events": row["events"] if row else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Finals partners, event series, what's new
+# ---------------------------------------------------------------------------
+
+_PLACED = "e.entry_result ~ '^[1-9]$'"
+
+
+@cached(ttl=600)
+async def get_jj_partners(db: Database, wsdc_id: int, limit: int) -> DancerPartners:
+    """Partners in Jack & Jill finals. The registry does not record couples, but a final places
+    couples: the leader and the follower who took the same place in the same division danced together."""
+    dancer = await db.fetch_one(
+        "SELECT contester_first_name, contester_last_name, contester_full_name FROM contester_view "
+        "WHERE contester_id = %(id)s",
+        {"id": wsdc_id},
+    )
+    if dancer is None:
+        raise NotFound(f"No dancer with WSDC ID {wsdc_id}. Use search_dancers to look up the ID by name.")
+    name = _display_name(dancer.get("contester_first_name"), dancer.get("contester_last_name"), dancer.get("contester_full_name"))
+    # Two steps instead of a self-join: entry_view is indexed by event, not by dancer.
+    mine = await db.fetch_all(
+        f"SELECT e.entry_event, e.entry_division, e.entry_result, e.entry_type FROM entry_view e "
+        f"WHERE e.entry_contester = %(id)s AND {_PLACED}",
+        {"id": wsdc_id},
+    )
+    rows = await db.fetch_all(
+        f"""
+        SELECT e.entry_event, e.entry_division, e.entry_result, e.entry_type, e.entry_contester,
+               ev.event_name, ev.event_start_date, d.division_name, d.division_sortorder,
+               c.contester_first_name, c.contester_last_name, c.contester_full_name, c.contester_country_name
+        FROM entry_view e
+        JOIN event ev ON ev.event_id = e.entry_event
+        JOIN division d ON d.division_id = e.entry_division
+        JOIN contester_view c ON c.contester_id = e.entry_contester
+        WHERE e.entry_event = ANY(%(events)s) AND {_PLACED}
+        """,
+        {"events": sorted({r["entry_event"] for r in mine})},
+    ) if mine else []
+    by_place: dict[tuple[int, int, str], list[dict[str, Any]]] = {}
+    for r in rows:
+        by_place.setdefault((r["entry_event"], r["entry_division"], r["entry_result"]), []).append(r)
+    partnerships: list[tuple[Any, int, Partnership]] = []
+    for m in mine:
+        place = by_place.get((m["entry_event"], m["entry_division"], m["entry_result"]), [])
+        same = [r for r in place if r["entry_type"] == m["entry_type"]]
+        other = [r for r in place if r["entry_type"] != m["entry_type"]]
+        if len(same) != 1 or len(other) != 1:  # a tie or a gap in the record: no way to tell the couple
+            continue
+        p = other[0]
+        partnerships.append((
+            p["event_start_date"], p["division_sortorder"],
+            Partnership(
+                date=_d(p["event_start_date"]),
+                event_id=p["entry_event"],
+                event_name=p["event_name"],
+                division=p["division_name"],
+                placement=_placement(m["entry_result"]),
+                role=ENTRY_TYPE.get(m["entry_type"], m["entry_type"] or "Unknown"),
+                partner_wsdc_id=p["entry_contester"],
+                partner_name=_display_name(p["contester_first_name"], p["contester_last_name"], p["contester_full_name"]),
+                partner_country=p["contester_country_name"],
+            ),
+        ))
+    partnerships.sort(key=lambda t: (t[0] or datetime.min, t[1]), reverse=True)
+    ordered = [t[2] for t in partnerships]
+    together: dict[int, list[Partnership]] = {}
+    for p in ordered:
+        together.setdefault(p.partner_wsdc_id, []).append(p)
+    frequent = [
+        FrequentPartner(
+            wsdc_id=pid,
+            name=ps[0].partner_name,
+            country=ps[0].partner_country,
+            times=len(ps),
+            best_placement=_placement(str(min(int(p.placement[0]) for p in ps))),
+            last_date=ps[0].date,
+        )
+        for pid, ps in together.items()
+        if len(ps) > 1
+    ]
+    frequent.sort(key=lambda f: (-f.times, f.best_placement, f.name))
+    return DancerPartners(
+        wsdc_id=wsdc_id,
+        name=name,
+        placements=len(mine),
+        paired=len(ordered),
+        frequent_partners=frequent[:20],
+        partnerships=ordered[:limit],
+        note=(
+            "Jack & Jill partners are drawn at random; a final places couples, so the partner is the dancer of "
+            "the other role who took the same place. Finalists without a placement, and ties, cannot be paired."
+        ),
+    )
+
+
+def _event_summary(r: dict[str, Any], results_count: int) -> EventSummary:
+    return EventSummary(
+        event_id=r["event_id"],
+        name=r["event_name"],
+        start_date=_d(r["event_start_date"]),
+        end_date=_d(r["event_end_date"]),
+        location=r["location_name"],
+        country=r["country_name"],
+        results_count=results_count,
+    )
+
+
+async def _placements(
+    db: Database, event_ids: list[int], division: str | None, places: int
+) -> dict[int, list[DivisionResults]]:
+    """Placements up to `places` per event and division, highest division first."""
+    if not event_ids:
+        return {}
+    rows = await db.fetch_all(
+        f"""
+        SELECT e.entry_event, d.division_name, e.entry_type, e.entry_result, e.entry_points,
+               c.contester_id, c.contester_first_name, c.contester_last_name, c.contester_full_name,
+               c.contester_country_name
+        FROM entry_view e
+        JOIN division d ON d.division_id = e.entry_division
+        JOIN contester_view c ON c.contester_id = e.entry_contester
+        WHERE e.entry_event = ANY(%(events)s)
+          AND CASE WHEN {_PLACED} THEN e.entry_result::int END <= %(places)s
+          AND (%(division)s::text IS NULL OR d.division_name = %(division)s)
+        ORDER BY e.entry_event, d.division_sortorder DESC, e.entry_result, e.entry_type DESC
+        """,
+        {"events": event_ids, "division": division, "places": places},
+    )
+    out: dict[int, list[DivisionResults]] = {}
+    for r in rows:
+        divisions = out.setdefault(r["entry_event"], [])
+        if not divisions or divisions[-1].division != r["division_name"]:
+            divisions.append(DivisionResults(division=r["division_name"], results=[]))
+        divisions[-1].results.append(
+            EventPlacement(
+                placement=_placement(r["entry_result"]),
+                role=ENTRY_TYPE.get(r["entry_type"], r["entry_type"] or "Unknown"),
+                points=int(r["entry_points"] or 0),
+                wsdc_id=r["contester_id"],
+                name=_display_name(r["contester_first_name"], r["contester_last_name"], r["contester_full_name"]),
+                country=r["contester_country_name"],
+            )
+        )
+    return out
+
+
+_EVENT_COLUMNS = """ev.event_id, ev.event_name, ev.event_start_date, ev.event_end_date, ev.event_internal_id,
+               l.location_name, co.country_name"""
+_EVENT_JOINS = """LEFT JOIN location l ON l.location_id = ev.event_location
+        LEFT JOIN country co ON co.country_id = l.location_country"""
+
+
+@cached(ttl=900)
+async def get_event_history(
+    db: Database, query: str, division: str | None, places: int, limit: int
+) -> EventHistoryResult:
+    """Every edition of an event series (WSDC keeps one event ID per series) with its top placements."""
+    division = normalize_division(division)
+    tokens = normalize_name_query(query).split()[:6]
+    if not tokens:
+        raise NotFound("Give words from the event's name, e.g. 'US Open' or 'Swing Diego'.")
+    params: dict[str, Any] = {f"t{i}": _like(t) for i, t in enumerate(tokens)}
+    conds = " AND ".join(f"lower(ev.event_name) LIKE %(t{i})s" for i in range(len(tokens)))
+    matches = await db.fetch_all(
+        f"""
+        SELECT coalesce(ev.event_internal_id, -ev.event_id) AS series, count(*)::int AS editions,
+               (array_agg(ev.event_name ORDER BY ev.event_start_date DESC))[1] AS name
+        FROM event ev
+        WHERE {conds} AND EXISTS (SELECT 1 FROM entry_view x WHERE x.entry_event = ev.event_id)
+        GROUP BY 1
+        ORDER BY 2 DESC
+        LIMIT 20
+        """,
+        params,
+    )
+    if not matches:
+        raise NotFound(f"No event in the registry matches '{query}'. Try fewer or different words, or search_events.")
+    wanted = " ".join(tokens)
+    best = next((m for m in matches if normalize_name_query(m["name"]) == wanted), matches[0])
+    rows = await db.fetch_all(
+        f"""
+        SELECT {_EVENT_COLUMNS},
+               (SELECT count(*) FROM entry_view x WHERE x.entry_event = ev.event_id)::int AS results_count
+        FROM event ev
+        {_EVENT_JOINS}
+        WHERE coalesce(ev.event_internal_id, -ev.event_id) = %(series)s
+          AND EXISTS (SELECT 1 FROM entry_view x WHERE x.entry_event = ev.event_id)
+        ORDER BY ev.event_start_date DESC NULLS LAST
+        """,
+        {"series": best["series"]},
+    )
+    shown = rows[:limit]
+    placements = await _placements(db, [r["event_id"] for r in shown], division, places)
+    return EventHistoryResult(
+        series=best["name"],
+        wsdc_event_id=best["series"] if best["series"] > 0 else None,
+        editions_total=len(rows),
+        editions=[
+            EventEdition(event=_event_summary(r, r["results_count"]), divisions=placements.get(r["event_id"], []))
+            for r in shown
+        ],
+        other_series=[m["name"] for m in matches if m is not best][:10],
+    )
+
+
+@cached(ttl=900)
+async def registry_updates(db: Database, days: int, country: str | None, limit: int) -> RegistryUpdatesResult:
+    """Events whose results first appeared in the registry in the last `days` days."""
+    country_name = await resolve_country(db, country)
+    since = date.today() - timedelta(days=days)
+    rows = await db.fetch_all(
+        f"""
+        SELECT {_EVENT_COLUMNS}, min(x.entry_reg_date) AS published, count(*)::int AS results_count,
+               array_agg(DISTINCT d.division_sortorder::text || ':' || d.division_name) AS division_names,
+               count(*) OVER ()::int AS total
+        FROM entry_view x
+        JOIN event ev ON ev.event_id = x.entry_event
+        JOIN division d ON d.division_id = x.entry_division
+        {_EVENT_JOINS}
+        -- Only recent events: re-imports of the whole registry give old results new timestamps.
+        WHERE ev.event_start_date >= %(recent)s
+          AND (%(country)s::text IS NULL OR co.country_name = %(country)s)
+        GROUP BY ev.event_id, ev.event_name, ev.event_start_date, ev.event_end_date, ev.event_internal_id,
+                 l.location_name, co.country_name
+        HAVING min(x.entry_reg_date) >= %(since)s
+        ORDER BY published DESC, ev.event_name
+        LIMIT %(limit)s
+        """,
+        {"recent": since - timedelta(days=550), "since": since, "country": country_name, "limit": limit},
+    )
+    winners = await _placements(db, [r["event_id"] for r in rows], None, 1)
+    updates = []
+    for r in rows:
+        ranked = sorted((item.split(":", 1) for item in r["division_names"] or []), key=lambda x: -int(x[0]))
+        divisions = [name for _, name in ranked]
+        event_winners = winners.get(r["event_id"], [])
+        updates.append(RegistryUpdate(
+            event=_event_summary(r, r["results_count"]),
+            published=_d(r["published"]),
+            divisions=divisions,
+            top_division=event_winners[0] if event_winners else None,
+        ))
+    return RegistryUpdatesResult(
+        since=since, country=country_name, total=rows[0]["total"] if rows else 0, updates=updates
+    )
+
+
+# ---------------------------------------------------------------------------
+# Completions (prompt arguments being typed)
+# ---------------------------------------------------------------------------
+
+@cached(ttl=900)
+async def event_series_names(db: Database, prefix: str, limit: int) -> list[str]:
+    """Names of event series with results whose name contains every typed word, most recent first."""
+    tokens = normalize_name_query(prefix).split()[:6]
+    if not tokens:
+        return []
+    params: dict[str, Any] = {f"t{i}": _like(t) for i, t in enumerate(tokens)}
+    params["limit"] = limit
+    conds = " AND ".join(f"lower(ev.event_name) LIKE %(t{i})s" for i in range(len(tokens)))
+    rows = await db.fetch_all(
+        f"""
+        SELECT (array_agg(ev.event_name ORDER BY ev.event_start_date DESC))[1] AS name, max(ev.event_start_date) AS last
+        FROM event ev
+        WHERE {conds} AND EXISTS (SELECT 1 FROM entry_view x WHERE x.entry_event = ev.event_id)
+        GROUP BY coalesce(ev.event_internal_id, -ev.event_id)
+        ORDER BY last DESC NULLS LAST
+        LIMIT %(limit)s
+        """,
+        params,
+    )
+    return [r["name"] for r in rows]
+
+
+async def country_names_starting(db: Database, prefix: str, limit: int) -> list[str]:
+    prefix = prefix.strip().lower()
+    names = sorted(name for name, _ in await _country_names(db))
+    return [n for n in names if n.lower().startswith(prefix)][:limit]

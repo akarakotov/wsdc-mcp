@@ -162,3 +162,61 @@ class RulesSearchResult(BaseModel):
     query: str
     excerpts: list[RulesExcerpt]
     sections: list[str] = Field(description="All section headings in the rulebook, for follow-up searches")
+
+
+class Partnership(BaseModel):
+    date: dt.date | None = None
+    event_id: int
+    event_name: str
+    division: str
+    placement: str = Field(description="Place the couple took, '1st' to '5th'")
+    role: str = Field(description="The dancer's role in this final")
+    partner_wsdc_id: int
+    partner_name: str
+    partner_country: str | None = None
+
+
+class FrequentPartner(BaseModel):
+    wsdc_id: int
+    name: str
+    country: str | None = None
+    times: int = Field(description="Placements together")
+    best_placement: str
+    last_date: dt.date | None = None
+
+
+class DancerPartners(BaseModel):
+    wsdc_id: int
+    name: str
+    placements: int = Field(description="Placed Jack & Jill results (1st to 5th) of the dancer")
+    paired: int = Field(description="Placements whose partner could be identified")
+    frequent_partners: list[FrequentPartner] = Field(description="Partners placed with more than once, most often first")
+    partnerships: list[Partnership] = Field(description="Placements with their partner, most recent first")
+    note: str
+
+
+class EventEdition(BaseModel):
+    event: EventSummary
+    divisions: list[DivisionResults] = Field(description="Highest division first; requested placements only")
+
+
+class EventHistoryResult(BaseModel):
+    series: str = Field(description="Name of the event series (the most recent edition's name)")
+    wsdc_event_id: int | None = Field(None, description="WSDC's own ID of the event series")
+    editions_total: int = Field(description="Editions with results in the registry (before limit)")
+    editions: list[EventEdition] = Field(description="Most recent first")
+    other_series: list[str] = Field(description="Other event series that also matched the query")
+
+
+class RegistryUpdate(BaseModel):
+    event: EventSummary
+    published: dt.date = Field(description="When the event's results first appeared in the registry")
+    divisions: list[str] = Field(description="Divisions with results, highest first")
+    top_division: DivisionResults | None = Field(None, description="Winners (1st place) of the highest division")
+
+
+class RegistryUpdatesResult(BaseModel):
+    since: dt.date
+    country: str | None = None
+    total: int = Field(description="Events with newly published results (before limit)")
+    updates: list[RegistryUpdate] = Field(description="Most recently published first")

@@ -7,22 +7,28 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from importlib import resources
 from typing import Annotated, Any, ParamSpec, TypeVar
 
+from mcp.server.apps import Apps
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from mcp.types import Icon, ToolAnnotations
+from mcp.types import Completion, Icon, PromptReference, ToolAnnotations
 from pydantic import Field
 
 from . import __version__, data, usage
 from .config import Config
 from .db import Database
 from .models import (
+    ALL_DIVISIONS,
+    DancerPartners,
     DancerProfile,
     DancerResults,
     DivisionStatsResult,
+    EventHistoryResult,
     EventResults,
     RecentLevelupsResult,
+    RegistryUpdatesResult,
     RulesExcerpt,
     RulesSearchResult,
     SearchDancersResult,
@@ -56,11 +62,25 @@ How to use:
 - Registry dates have month precision: the day of month is always 01.
 - Rules questions (points per placement, move-up thresholds, tiers, dancing in a secondary role)
   -> search_wsdc_rules, and quote the rulebook version in the answer.
+- "Who did X dance with in finals?" -> get_jj_partners. "Who won event Y over the years?" ->
+  get_event_history. "What's new / which results came out recently?" -> get_registry_updates.
 - Data mirrors the public registry and is refreshed regularly, but the official source is
   worldsdc.com; mention that for anything consequential (e.g. contest registration disputes).
 """
 
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+
+# Prompt argument (module level: annotations are resolved against the module's globals).
+DancerArg = Annotated[str, Field(description="Dancer's name or WSDC ID")]
+
+# MCP Apps: an interactive dancer card that hosts supporting the extension render for get_dancer_profile.
+DANCER_CARD_URI = "ui://wsdc/dancer-card.html"
+
+
+def dancer_card_html(dancer_page_url: str | None) -> str:
+    """The card's HTML; `dancer_page_url` (with an {id} placeholder) adds an "Open page" button."""
+    html = resources.files("wsdc_mcp").joinpath("ui/dancer_card.html").read_text(encoding="utf-8")
+    return html.replace("__DANCER_URL__", json.dumps(dancer_page_url or ""))
 
 
 def _note_outcome(outcome: Callable[[Any], dict[str, Any]], result: Any) -> None:
@@ -74,6 +94,15 @@ def _note_outcome(outcome: Callable[[Any], dict[str, Any]], result: Any) -> None
 
 
 def build_server(config: Config, db: Database | None, rules: RulesIndex | None) -> MCPServer:
+    apps = Apps()
+    apps.add_html_resource(
+        DANCER_CARD_URI,
+        dancer_card_html(config.dancer_page_url),
+        name="dancer-card",
+        title="WSDC dancer card",
+        description="Interactive card for get_dancer_profile: divisions, points per division and level-ups per role.",
+        prefers_border=True,
+    )
     mcp = MCPServer(
         name=SERVER_NAME,
         title=SERVER_TITLE,
@@ -85,6 +114,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
             Icon(src=f"{config.public_url}/icon.svg", mime_type="image/svg+xml", sizes=["any"]),
         ],
         version=__version__,
+        extensions=[apps],
     )
 
     def need_db() -> Database:
@@ -93,7 +123,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         return db
 
     def tool(
-        title: str, outcome: Callable[[Any], dict[str, Any]] | None = None
+        title: str, outcome: Callable[[Any], dict[str, Any]] | None = None, meta: dict[str, Any] | None = None
     ) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
         """Register a read-only tool with call logging and user-facing error mapping.
 
@@ -131,7 +161,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
                         json.dumps(kwargs, default=str, ensure_ascii=False)[:300],
                     )
 
-            mcp.add_tool(wrapper, title=title, annotations=READ_ONLY, structured_output=True)
+            mcp.add_tool(wrapper, title=title, annotations=READ_ONLY, structured_output=True, meta=meta)
             return fn
 
         return decorator
@@ -155,7 +185,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         """
         return await data.search_dancers(need_db(), query, limit)
 
-    @tool("Get WSDC dancer profile", outcome=lambda r: {"subject": r.name})
+    @tool("Get WSDC dancer profile", outcome=lambda r: {"subject": r.name}, meta={"ui": {"resourceUri": DANCER_CARD_URI}})
     async def get_dancer_profile(
         wsdc_id: Annotated[int, Field(ge=1, le=9_999_999, description="WSDC competitor ID")],
     ) -> DancerProfile:
@@ -206,6 +236,47 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         division (highest first): placement, role, points awarded, dancer name and WSDC ID.
         """
         return await data.get_event_results(need_db(), event_id, division)
+
+    @tool("Get a dancer's Jack & Jill finals partners", outcome=lambda r: {"subject": r.name, "results": r.paired})
+    async def get_jj_partners(
+        wsdc_id: Annotated[int, Field(ge=1, le=9_999_999, description="WSDC competitor ID")],
+        limit: Annotated[int, Field(ge=1, le=200, description="Maximum number of placements to list")] = 30,
+    ) -> DancerPartners:
+        """Who a dancer was placed with in Jack & Jill finals: each placement (1st to 5th) with the
+        partner, most recent first, and the partners they placed with most often. The registry does
+        not record couples; a final places couples, so the partner is the dancer of the other role
+        who took the same place in the same division.
+        """
+        return await data.get_jj_partners(need_db(), wsdc_id, limit)
+
+    @tool("Get the history of a WSDC event", outcome=lambda r: {"subject": r.series, "results": r.editions_total})
+    async def get_event_history(
+        query: Annotated[
+            str, Field(min_length=2, max_length=100, description="Words from the event's name, e.g. 'US Open'")
+        ],
+        division: Annotated[
+            str | None, Field(description="Only this division, e.g. 'Champions' (default: every division)")
+        ] = None,
+        places: Annotated[int, Field(ge=1, le=5, description="Placements to show per division: 1 = winners only")] = 1,
+        limit: Annotated[int, Field(ge=1, le=60, description="Maximum number of editions (years) to return")] = 15,
+    ) -> EventHistoryResult:
+        """Every edition of a WSDC event series in the registry (for example each year's US Open),
+        most recent first, with the winners (or the top placements) of each division or of one
+        division. Also lists other event series that matched the query.
+        """
+        return await data.get_event_history(need_db(), query, division, places, limit)
+
+    @tool("Get what's new in the WSDC registry", outcome=lambda r: {"results": r.total})
+    async def get_registry_updates(
+        days: Annotated[int, Field(ge=1, le=120, description="Look-back window in days")] = 14,
+        country: Annotated[str | None, Field(max_length=60, description="Only events in this country")] = None,
+        limit: Annotated[int, Field(ge=1, le=50, description="Maximum number of events to return")] = 20,
+    ) -> RegistryUpdatesResult:
+        """Events whose results were published in the WSDC registry in the last days, most recent
+        first: event, when the results appeared, divisions held, and the winners of the highest
+        division. Pair with get_recent_levelups for dancers who moved up.
+        """
+        return await data.registry_updates(need_db(), days, country, limit)
 
     @tool("Get recent WSDC level-ups", outcome=lambda r: {"results": len(r.levelups)})
     async def get_recent_levelups(
@@ -273,6 +344,85 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         info["about"] = f"{config.public_url}/"
         info["note"] = "Unofficial mirror, not affiliated with the World Swing Dance Council."
         return info
+
+    # -------------------------------------------------------------- prompts and completions
+
+    @mcp.prompt(title="Which divisions can I dance?")
+    def divisions_check(dancer: DancerArg) -> str:
+        """Which Jack & Jill divisions a dancer may enter in each role, and what is missing for the next level."""
+        return (
+            f"Which Jack & Jill divisions can {dancer} enter in each role under the current WSDC rules, and how "
+            "many points are missing for the next level? Find the dancer with search_dancers unless a WSDC ID is "
+            "given, then use get_dancer_profile. For move-up thresholds use search_wsdc_rules and name the "
+            "rulebook version."
+        )
+
+    @mcp.prompt(title="A dancer's competition story")
+    def dancer_story(dancer: DancerArg) -> str:
+        """First points, level-ups, best results, favourite events and most frequent finals partners."""
+        return (
+            f"Tell the West Coast Swing competition story of {dancer}: first points, level-ups in each role, best "
+            "placements, the events they went to most, and the partners they made finals with most often. Use "
+            "search_dancers (unless a WSDC ID is given), get_dancer_profile, get_dancer_results and get_jj_partners."
+        )
+
+    @mcp.prompt(title="History of an event")
+    def event_story(
+        event: Annotated[str, Field(description="Event name, e.g. 'US Open'")],
+        division: Annotated[str | None, Field(description="Only this division, e.g. 'Champions'")] = None,
+    ) -> str:
+        """Winners of an event year by year, and who won it more than once."""
+        scope = f"the {division} division" if division else "the top divisions"
+        return (
+            f"Show the history of {event} in the WSDC registry: the winners of {scope} year by year, and who won "
+            "more than once. Use get_event_history; if it lists other matching series, say which one you used."
+        )
+
+    @mcp.prompt(title="What's new in the registry")
+    def registry_news(
+        country: Annotated[str | None, Field(description="Only this country, e.g. 'Germany'")] = None,
+    ) -> str:
+        """Results published in the last two weeks and the dancers who moved up."""
+        where = f" in {country}" if country else ""
+        return (
+            f"What's new in the WSDC points registry{where} over the last two weeks? Use get_registry_updates for "
+            "newly published event results and get_recent_levelups (days=14) for dancers who moved up, and "
+            "summarize by event."
+        )
+
+    @mcp.prompt(title="Ask about the WSDC rules")
+    def rules_question(question: Annotated[str, Field(description="Your question about the WSDC rules")]) -> str:
+        """Answer a question from the official WSDC Registry rulebook."""
+        return (
+            f"Answer this question about the WSDC Registry rules: {question}\nUse search_wsdc_rules, quote the "
+            "relevant sections with the rulebook version, and say when to check the official rules at worldsdc.com."
+        )
+
+    async def complete(argument: str, value: str) -> list[str]:
+        prefix = value.strip()
+        if argument == "division":
+            return [d for d in ALL_DIVISIONS if d.lower().startswith(prefix.lower())]
+        if len(prefix) < 2 or db is None:
+            return []
+        if argument == "dancer":
+            found = await data.search_dancers(db, prefix, 10)
+            return [f"{d.name} (WSDC #{d.wsdc_id})" for d in found.dancers]
+        if argument == "event":
+            return await data.event_series_names(db, prefix, 10)
+        if argument == "country":
+            return await data.country_names_starting(db, prefix, 10)
+        return []
+
+    @mcp.completion()
+    async def completion(ref: Any, argument: Any, context: Any) -> Completion | None:
+        """Suggest dancers, events, countries and divisions while a prompt's arguments are typed."""
+        if not isinstance(ref, PromptReference):
+            return None
+        try:
+            values = await complete(argument.name, argument.value)
+        except data.NotFound:
+            values = []
+        return Completion(values=values[:100], total=len(values), has_more=False)
 
     if rules is not None:
 

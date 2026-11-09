@@ -1,7 +1,7 @@
 """Usage log for the MCP endpoint: one JSON line per POST to /mcp.
 
 Each line records what was asked (the JSON-RPC method; the tool and its arguments for
-tools/call), who asked (the client app name and version sent with initialize, the User-Agent
+tools/call; the prompt or resource for prompts/get, completion/complete and resources/read), who asked (the client app name and version sent with initialize, the User-Agent
 and IP address) and how it went (HTTP status, tool status, duration, and for some tools how
 many results they found or whose profile they returned). Lines go to the
 `wsdc_mcp.usage` logger; `log_to_file` sends them to a file rotated daily at midnight UTC.
@@ -83,6 +83,13 @@ def describe(body: bytes) -> dict[str, Any]:
         if method == "tools/call":
             fields["tool"] = _text(params.get("name"))
             fields["args"] = json.dumps(params.get("arguments") or {}, default=str, ensure_ascii=False)[:MAX_ARGS]
+        elif method == "prompts/get":
+            fields["prompt"] = _text(params.get("name"))
+        elif method == "completion/complete":
+            ref = _object(params.get("ref"))
+            fields["prompt"] = _text(ref.get("name") or ref.get("uri"))
+        elif method == "resources/read":
+            fields["resource"] = _text(params.get("uri"))
     fields["method"] = ",".join(methods) or "invalid"
     return fields
 

@@ -34,6 +34,8 @@ class Config:
     log_level: str
     # File for the usage log (one JSON line per MCP request, rotated daily); unset = the process log.
     usage_log: Path | None = None
+    # A dancer's page on the hosting website, with an {id} placeholder (adds a link to the dancer card).
+    dancer_page_url: str | None = None
 
     @property
     def mcp_url(self) -> str:

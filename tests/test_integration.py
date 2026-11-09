@@ -125,3 +125,61 @@ def test_division_stats_and_registry_info(server_url):
     assert stats["dancers"] > 1000 and stats["divisions"]
     info = call(server_url, "get_registry_info", {}).structured_content
     assert info["dancers"] == stats["dancers"]
+
+
+def test_finals_partners(server_url):
+    dancer = any_dancer(server_url)
+    r = call(server_url, "get_jj_partners", {"wsdc_id": dancer["wsdc_id"], "limit": 5}).structured_content
+    assert r["wsdc_id"] == dancer["wsdc_id"] and r["paired"] <= r["placements"]
+    assert len(r["partnerships"]) <= 5
+    for p in r["partnerships"]:
+        assert p["role"] in ("Leader", "Follower") and p["partner_wsdc_id"] != dancer["wsdc_id"]
+        assert p["placement"] in ("1st", "2nd", "3rd", "4th", "5th")
+    assert all(f["times"] > 1 for f in r["frequent_partners"])
+    # The partner sees the dancer as their partner in the same final.
+    if r["partnerships"]:
+        p = r["partnerships"][0]
+        back = call(server_url, "get_jj_partners", {"wsdc_id": p["partner_wsdc_id"], "limit": 200}).structured_content
+        assert any(q["partner_wsdc_id"] == dancer["wsdc_id"] and q["event_id"] == p["event_id"] for q in back["partnerships"])
+    assert call(server_url, "get_jj_partners", {"wsdc_id": 9_999_999}).is_error
+
+
+def test_event_history(server_url):
+    event = call(server_url, "search_events", {"limit": 1}).structured_content["events"][0]
+    words = " ".join(event["name"].split()[:2])
+    r = call(server_url, "get_event_history", {"query": words, "places": 2, "limit": 3}).structured_content
+    assert r["editions_total"] >= len(r["editions"]) >= 1 and len(r["editions"]) <= 3
+    dates = [e["event"]["start_date"] for e in r["editions"]]
+    assert dates == sorted(dates, reverse=True)
+    for edition in r["editions"]:
+        for division in edition["divisions"]:
+            assert {x["placement"] for x in division["results"]} <= {"1st", "2nd"}
+    assert call(server_url, "get_event_history", {"query": "zzqx nothing like this"}).is_error
+
+
+def test_registry_updates(server_url):
+    r = call(server_url, "get_registry_updates", {"days": 120, "limit": 5}).structured_content
+    assert r["total"] >= len(r["updates"])
+    published = [u["published"] for u in r["updates"]]
+    assert published == sorted(published, reverse=True)
+    for u in r["updates"]:
+        assert u["published"] >= r["since"] and u["divisions"]
+        if u["top_division"]:
+            assert u["top_division"]["division"] == u["divisions"][0]
+            assert {x["placement"] for x in u["top_division"]["results"]} == {"1st"}
+
+
+def test_completions_suggest_dancers_and_events(server_url):
+    from mcp.types import PromptReference
+
+    async def run():
+        async with Client(server_url) as client:
+            dancers = await client.complete(PromptReference(name="dancer_story"), {"name": "dancer", "value": "smith"})
+            events = await client.complete(PromptReference(name="event_story"), {"name": "event", "value": "open"})
+            countries = await client.complete(PromptReference(name="registry_news"), {"name": "country", "value": "ger"})
+            return dancers, events, countries
+
+    dancers, events, countries = asyncio.run(run())
+    assert dancers.completion.values and all("(WSDC #" in v for v in dancers.completion.values)
+    assert events.completion.values and all("open" in v.lower() for v in events.completion.values)
+    assert countries.completion.values == ["Germany"]

@@ -166,7 +166,8 @@ def test_tools_are_titled_read_only_and_structured(config):
     tools, missing_db, rules = asyncio.run(run())
     names = {t.name for t in tools}
     assert {"search_dancers", "get_dancer_profile", "get_dancer_results", "search_events", "get_event_results",
-            "get_recent_levelups", "get_division_stats", "search_wsdc_rules", "get_registry_info"} == names
+            "get_recent_levelups", "get_division_stats", "search_wsdc_rules", "get_registry_info",
+            "get_jj_partners", "get_event_history", "get_registry_updates"} == names
     for t in tools:
         assert t.title, t.name
         assert t.description and len(t.description) > 40, t.name
@@ -306,6 +307,12 @@ def test_usage_describe_handles_batches_and_garbage():
         "method": "tools/call", "tool": "x", "args": "{}"}
     assert usage.describe(b'{"method":"initialize","params":{"clientInfo":"nope"}}') == {"method": "initialize"}
     assert usage.describe(b"null") == {"method": "invalid"}
+    assert usage.describe(b'{"method":"prompts/get","params":{"name":"dancer_story","arguments":{}}}') == {
+        "method": "prompts/get", "prompt": "dancer_story"}
+    assert usage.describe(b'{"method":"completion/complete","params":{"ref":{"type":"ref/prompt","name":"event_story"}}}') == {
+        "method": "completion/complete", "prompt": "event_story"}
+    assert usage.describe(b'{"method":"resources/read","params":{"uri":"ui://wsdc/dancer-card.html"}}') == {
+        "method": "resources/read", "resource": "ui://wsdc/dancer-card.html"}
 
 
 def test_usage_log_to_file(tmp_path):
@@ -355,3 +362,50 @@ def test_server_json_matches_code():
     assert manifest["description"] == SERVER_DESCRIPTION
     assert manifest["version"] == __version__
     assert manifest["remotes"] == [{"type": "streamable-http", "url": "https://wcspoints.com/mcp"}]
+
+
+# -- prompts, completions, MCP Apps -------------------------------------------
+
+
+def test_prompts_completions_and_the_dancer_card(config):
+    from dataclasses import replace
+
+    from mcp.types import PromptReference
+
+    from wsdc_mcp.server import DANCER_CARD_URI
+
+    async def run():
+        mcp = build_server(replace(config, dancer_page_url="https://wcspoints.test/dancer/{id}"), db=None, rules=None)
+        async with Client(mcp) as client:
+            prompts = (await client.list_prompts()).prompts
+            story = await client.get_prompt("event_story", {"event": "US Open", "division": "Champions"})
+            divisions = await client.complete(PromptReference(name="event_story"), {"name": "division", "value": "A"})
+            dancers = await client.complete(PromptReference(name="dancer_story"), {"name": "dancer", "value": "Jane"})
+            tools = {t.name: t for t in (await client.list_tools()).tools}
+            card = await client.read_resource(DANCER_CARD_URI)
+            return client.server_capabilities, prompts, story, divisions, dancers, tools, card
+
+    capabilities, prompts, story, divisions, dancers, tools, card = asyncio.run(run())
+    assert {p.name for p in prompts} == {"divisions_check", "dancer_story", "event_story", "registry_news", "rules_question"}
+    for p in prompts:
+        assert p.title and p.description and p.arguments, p.name
+        assert all(a.description for a in p.arguments), p.name
+    text = story.messages[0].content.text
+    assert "US Open" in text and "Champions division" in text and "get_event_history" in text
+    assert capabilities.completions is not None
+    assert divisions.completion.values == ["Advanced", "All-Stars"]
+    assert dancers.completion.values == []  # no database here
+    # MCP Apps: the profile tool points at the card, which is served with the Apps MIME type.
+    assert "io.modelcontextprotocol/ui" in (capabilities.extensions or {})
+    assert tools["get_dancer_profile"].meta == {"ui": {"resourceUri": DANCER_CARD_URI}}
+    assert all(t.meta is None for name, t in tools.items() if name != "get_dancer_profile")
+    html = card.contents[0]
+    assert html.mime_type == "text/html;profile=mcp-app"
+    assert '"https://wcspoints.test/dancer/{id}"' in html.text and "__DANCER_URL__" not in html.text
+    assert "ui/initialize" in html.text and "ui/notifications/tool-result" in html.text
+
+
+def test_dancer_card_without_a_website_has_no_link():
+    from wsdc_mcp.server import dancer_card_html
+
+    assert "const DANCER_URL = \"\";" in dancer_card_html(None)
