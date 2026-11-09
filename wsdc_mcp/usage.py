@@ -2,7 +2,8 @@
 
 Each line records what was asked (the JSON-RPC method; the tool and its arguments for
 tools/call), who asked (the client app name and version sent with initialize, the User-Agent
-and IP address) and how it went (HTTP status, tool status, duration). Lines go to the
+and IP address) and how it went (HTTP status, tool status, duration, and for some tools how
+many results they found or whose profile they returned). Lines go to the
 `wsdc_mcp.usage` logger; `log_to_file` sends them to a file rotated daily at midnight UTC.
 """
 

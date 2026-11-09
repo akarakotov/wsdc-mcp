@@ -63,6 +63,16 @@ How to use:
 READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 
 
+def _note_outcome(outcome: Callable[[Any], dict[str, Any]], result: Any) -> None:
+    """Add what `outcome` says about a tool result to the usage line; never fails the call."""
+    try:
+        fields = outcome(result)
+    except Exception:
+        logger.exception("usage outcome failed")
+        return
+    usage.note(**{k: v[:usage.MAX_TEXT] if isinstance(v, str) else v for k, v in fields.items()})
+
+
 def build_server(config: Config, db: Database | None, rules: RulesIndex | None) -> MCPServer:
     mcp = MCPServer(
         name=SERVER_NAME,
@@ -82,8 +92,14 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
             raise ToolError("The registry database is not configured on this server.")
         return db
 
-    def tool(title: str) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
-        """Register a read-only tool with call logging and user-facing error mapping."""
+    def tool(
+        title: str, outcome: Callable[[Any], dict[str, Any]] | None = None
+    ) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
+        """Register a read-only tool with call logging and user-facing error mapping.
+
+        `outcome` picks what the usage log keeps about a result: how many matches it had, or
+        whose data it was, so that usage statistics can tell what people look for and miss.
+        """
 
         def decorator(fn: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
             @functools.wraps(fn)
@@ -91,7 +107,10 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
                 started = time.perf_counter()
                 status = "ok"
                 try:
-                    return await fn(*args, **kwargs)
+                    result = await fn(*args, **kwargs)
+                    if outcome is not None:
+                        _note_outcome(outcome, result)
+                    return result
                 except data.NotFound as exc:
                     status = "not_found"
                     raise ToolError(str(exc)) from exc
@@ -117,7 +136,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
 
         return decorator
 
-    @tool("Search WSDC dancers")
+    @tool("Search WSDC dancers", outcome=lambda r: {"results": len(r.dancers), "match": r.match_type})
     async def search_dancers(
         query: Annotated[
             str,
@@ -136,7 +155,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         """
         return await data.search_dancers(need_db(), query, limit)
 
-    @tool("Get WSDC dancer profile")
+    @tool("Get WSDC dancer profile", outcome=lambda r: {"subject": r.name})
     async def get_dancer_profile(
         wsdc_id: Annotated[int, Field(ge=1, le=9_999_999, description="WSDC competitor ID")],
     ) -> DancerProfile:
@@ -146,7 +165,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         """
         return await data.get_dancer_profile(need_db(), wsdc_id)
 
-    @tool("Get WSDC dancer competition results")
+    @tool("Get WSDC dancer competition results", outcome=lambda r: {"subject": r.name, "results": r.total_results})
     async def get_dancer_results(
         wsdc_id: Annotated[int, Field(ge=1, le=9_999_999, description="WSDC competitor ID")],
         division: Annotated[
@@ -161,7 +180,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         """
         return await data.get_dancer_results(need_db(), wsdc_id, division, role, year, limit)
 
-    @tool("Search WSDC events")
+    @tool("Search WSDC events", outcome=lambda r: {"results": len(r.events)})
     async def search_events(
         query: Annotated[
             str | None, Field(max_length=100, description="Words from the event name or city, e.g. 'Swing Diego'")
@@ -178,7 +197,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         """
         return await data.search_events(need_db(), query, year, country, limit)
 
-    @tool("Get WSDC event results")
+    @tool("Get WSDC event results", outcome=lambda r: {"subject": r.event.name})
     async def get_event_results(
         event_id: Annotated[int, Field(ge=1, description="Event ID from search_events")],
         division: Annotated[str | None, Field(description="Only this division, e.g. 'Champions'")] = None,
@@ -188,7 +207,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         """
         return await data.get_event_results(need_db(), event_id, division)
 
-    @tool("Get recent WSDC level-ups")
+    @tool("Get recent WSDC level-ups", outcome=lambda r: {"results": len(r.levelups)})
     async def get_recent_levelups(
         country: Annotated[str | None, Field(max_length=60, description="Only dancers from this country")] = None,
         division: Annotated[
@@ -216,7 +235,7 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
         """
         return await data.division_stats(need_db(), country, active_within_months)
 
-    @tool("Search the WSDC rules")
+    @tool("Search the WSDC rules", outcome=lambda r: {"results": len(r.excerpts)})
     async def search_wsdc_rules(
         query: Annotated[
             str,

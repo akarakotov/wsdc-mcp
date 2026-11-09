@@ -263,6 +263,7 @@ def test_usage_log_names_client_and_tool(config, caplog, mode):
         ("search_wsdc_rules", "ok", 200), ("get_dancer_profile", "tool_error", 200),
     ]
     assert json.loads(calls[0]["args"]) == {"query": "novice points"}
+    assert calls[0]["results"] >= 1 and "results" not in calls[1]  # what a successful call found
     named = [line for line in lines if line.get("client") == "test-client"]
     assert named and all(line["client_version"] == "9.9" for line in named)
     if mode == "legacy":
@@ -270,6 +271,13 @@ def test_usage_log_names_client_and_tool(config, caplog, mode):
     else:
         assert all(line.get("client") == "test-client" for line in calls)
     assert all(line["ip"] and line["ts"].endswith("+00:00") and "ms" in line for line in lines)
+
+
+def test_usage_outcome_never_fails_a_tool_call(caplog):
+    from wsdc_mcp import server
+
+    server._note_outcome(lambda result: {"subject": result.name}, object())  # no such attribute
+    assert "usage outcome failed" in caplog.text
 
 
 def test_usage_log_skips_other_requests_and_survives_junk(config, caplog):
