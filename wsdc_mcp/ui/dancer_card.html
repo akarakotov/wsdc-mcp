@@ -122,7 +122,11 @@
 
   function roleBlock(role) {
     if (!role.has_points) {
-      return el("div", { class: "role" }, el("h2", {}, role.role), el("div", { class: "none" }, `No points as ${role.role.toLowerCase()}.`));
+      const may = role.allowed_divisions || [];
+      return el("div", { class: "role" }, el("h2", {}, role.role),
+        el("div", { class: "none" }, `No points as ${role.role.toLowerCase()} yet.`),
+        may.length ? [el("div", { class: "label" }, "Can enter"),
+          el("div", { class: "chips" }, may.map((d) => el("span", { class: "chip" }, d)))] : null);
     }
     const points = role.points_by_division || {};
     const shown = SKILL.filter((d) => points[d]);
@@ -130,7 +134,8 @@
     const allowed = role.allowed_divisions || [];
     return el("div", { class: "role" },
       el("h2", {}, role.role),
-      el("div", { class: "division" }, role.division || "—", " ", el("small", {}, `${role.division_points || 0} pts`)),
+      el("div", { class: "division" }, role.division || "—", " ",
+        el("small", {}, `${role.division_points || 0} ${role.division_points === 1 ? "pt" : "pts"}`)),
       allowed.length ? [el("div", { class: "label" }, "Can enter"),
         el("div", { class: "chips" }, allowed.map((d) => el("span", { class: d === role.division ? "chip top" : "chip" }, d)))] : null,
       shown.length ? [el("div", { class: "label" }, "Points by division"),
