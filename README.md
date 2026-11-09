@@ -77,13 +77,15 @@ WSDC_MCP_DB_DSN="dbname=wsdc host=127.0.0.1" venv/bin/python -m wsdc_mcp      # 
 | `WSDC_MCP_HOST` / `WSDC_MCP_PORT` | Bind address (default `127.0.0.1:8001`) |
 | `WSDC_MCP_RULES_PATH` | Plain-text WSDC rulebook; enables `search_wsdc_rules` |
 | `WSDC_MCP_POOL_MAX`, `WSDC_MCP_STATEMENT_TIMEOUT_MS` | DB pool size (3) and per-query timeout (8000 ms) |
+| `WSDC_MCP_USAGE_LOG` | File for the usage log: one JSON line per MCP request (method, tool, client app, status), rotated daily and kept 30 days. Unset: the lines go to the process log |
 
 The server expects the registry schema of the WSDC parser project (`contester_view`,
 `contester_view_roles`, `entry_view`, `event`, …); the code is published for transparency and reuse.
 
 ## Privacy
 
-No accounts, cookies or trackers. Requests and tool calls are logged for up to 30 days for operations.
+No accounts, cookies or trackers. Requests and tool calls (including the name of the AI app that sent
+them) are logged for up to 30 days for operations and usage counts.
 Results contain only what the WSDC publishes in its public registry. See [wcspoints.com/privacy](https://wcspoints.com/privacy).
 
 ## License

@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 
 import httpx2 as httpx
 import pytest
 from mcp import Client
+from mcp.client.streamable_http import streamable_http_client
+from mcp.types import Implementation
 
-from wsdc_mcp import data
+from wsdc_mcp import data, usage
 from wsdc_mcp.app import create_app
 from wsdc_mcp.db import cached
 from wsdc_mcp.rules import RulesIndex
@@ -231,6 +235,82 @@ def test_get_on_mcp_endpoint_does_not_hang(config):
     assert preflight.status_code == 200 and preflight.headers["access-control-allow-origin"] == "*"
     _, browser, _ = asyncio.run(run(create_app(config, browser_url="/#connect")))
     assert browser.status_code == 302 and browser.headers["location"] == "/#connect"
+
+
+def _usage_lines(caplog) -> list[dict]:
+    return [json.loads(r.getMessage()) for r in caplog.records if r.name == "wsdc_mcp.usage"]
+
+
+@pytest.mark.parametrize("mode", ["legacy", "2026-07-28"])
+def test_usage_log_names_client_and_tool(config, caplog, mode):
+    caplog.set_level(logging.INFO, logger="wsdc_mcp.usage")
+    app = create_app(config, rules=RulesIndex(SAMPLE_RULES, "2026.1B"))
+
+    async def run():
+        async with app.router.lifespan_context(app), _http(app) as http:
+            transport = streamable_http_client("https://wcspoints.test/mcp", http_client=http)
+            info = Implementation(name="test-client", version="9.9")
+            async with Client(transport, client_info=info, mode=mode) as client:
+                rules = await client.call_tool("search_wsdc_rules", {"query": "novice points"})
+                missing = await client.call_tool("get_dancer_profile", {"wsdc_id": 1})
+                return rules, missing
+
+    rules, missing = asyncio.run(run())
+    assert not rules.is_error and missing.is_error
+    lines = _usage_lines(caplog)
+    calls = [line for line in lines if line["method"] == "tools/call"]
+    assert [(c["tool"], c["tool_status"], c["status"]) for c in calls] == [
+        ("search_wsdc_rules", "ok", 200), ("get_dancer_profile", "tool_error", 200),
+    ]
+    assert json.loads(calls[0]["args"]) == {"query": "novice points"}
+    named = [line for line in lines if line.get("client") == "test-client"]
+    assert named and all(line["client_version"] == "9.9" for line in named)
+    if mode == "legacy":
+        assert any(line["method"] == "initialize" for line in named)
+    else:
+        assert all(line.get("client") == "test-client" for line in calls)
+    assert all(line["ip"] and line["ts"].endswith("+00:00") and "ms" in line for line in lines)
+
+
+def test_usage_log_skips_other_requests_and_survives_junk(config, caplog):
+    caplog.set_level(logging.INFO, logger="wsdc_mcp.usage")
+    app = create_app(config)
+
+    async def run():
+        async with app.router.lifespan_context(app), _http(app) as http:
+            await http.get("/mcp")
+            await http.get("/health")
+            return await http.post("/mcp", content=b"{not json", headers={
+                "Content-Type": "application/json", "Accept": "application/json, text/event-stream",
+                "User-Agent": "junk/1.0"})
+
+    junk = asyncio.run(run())
+    lines = _usage_lines(caplog)
+    assert len(lines) == 1
+    assert lines[0]["method"] == "invalid" and lines[0]["ua"] == "junk/1.0"
+    assert lines[0]["status"] == junk.status_code >= 400
+
+
+def test_usage_describe_handles_batches_and_garbage():
+    assert usage.describe(b'[{"jsonrpc":"2.0","method":"tools/list","id":1},{"jsonrpc":"2.0","result":{},"id":2}, 7]') == {
+        "method": "tools/list,response,invalid"}
+    assert usage.describe(b'{"method":"tools/call","params":{"name":"x","arguments":null,"_meta":[]}}') == {
+        "method": "tools/call", "tool": "x", "args": "{}"}
+    assert usage.describe(b'{"method":"initialize","params":{"clientInfo":"nope"}}') == {"method": "initialize"}
+    assert usage.describe(b"null") == {"method": "invalid"}
+
+
+def test_usage_log_to_file(tmp_path):
+    path = tmp_path / "logs" / "usage.jsonl"
+    try:
+        usage.log_to_file(path)
+        usage.logger.info('{"method":"tools/list"}')
+    finally:
+        for handler in list(usage.logger.handlers):
+            handler.close()
+            usage.logger.removeHandler(handler)
+        usage.logger.propagate = True
+    assert path.read_text() == '{"method":"tools/list"}\n'
 
 
 def test_extensions_mount_extra_routes(config):

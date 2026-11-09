@@ -14,7 +14,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import Icon, ToolAnnotations
 from pydantic import Field
 
-from . import __version__, data
+from . import __version__, data, usage
 from .config import Config
 from .db import Database
 from .models import (
@@ -102,11 +102,13 @@ def build_server(config: Config, db: Database | None, rules: RulesIndex | None) 
                     status = "error"
                     raise
                 finally:
+                    elapsed_ms = (time.perf_counter() - started) * 1000
+                    usage.note(tool_status=status, tool_ms=round(elapsed_ms))
                     logger.info(
                         "tool=%s status=%s ms=%.0f args=%s",
                         fn.__name__,
                         status,
-                        (time.perf_counter() - started) * 1000,
+                        elapsed_ms,
                         json.dumps(kwargs, default=str, ensure_ascii=False)[:300],
                     )
 

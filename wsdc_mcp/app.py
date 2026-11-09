@@ -22,6 +22,7 @@ from .db import Database
 from .discovery import Discovery
 from .rules import RulesIndex
 from .server import build_server
+from .usage import UsageLog
 
 logger = logging.getLogger("wsdc_mcp")
 
@@ -106,6 +107,7 @@ def create_app(
                 await db.close()
 
     app.router.lifespan_context = lifespan
+    app.add_middleware(UsageLog)
     app.add_middleware(McpGetGuard, browser_url=browser_url)
     # Browser-based MCP clients and inspectors call the endpoint cross-origin.
     app.add_middleware(

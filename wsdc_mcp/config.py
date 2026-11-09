@@ -32,6 +32,8 @@ class Config:
     registry_auth: str | None
     repo_url: str
     log_level: str
+    # File for the usage log (one JSON line per MCP request, rotated daily); unset = the process log.
+    usage_log: Path | None = None
 
     @property
     def mcp_url(self) -> str:
@@ -44,6 +46,7 @@ class Config:
 
 def load_config() -> Config:
     rules_path = _env("WSDC_MCP_RULES_PATH")
+    usage_log = _env("WSDC_MCP_USAGE_LOG")
     return Config(
         db_dsn=_env("WSDC_MCP_DB_DSN") or _env("MCP_DB_DSN"),
         public_url=(_env("WSDC_MCP_PUBLIC_URL", "https://wcspoints.com") or "").rstrip("/"),
@@ -56,4 +59,5 @@ def load_config() -> Config:
         registry_auth=_env("WSDC_MCP_REGISTRY_AUTH"),
         repo_url=(_env("WSDC_MCP_REPO_URL", "https://github.com/akarakotov/wsdc-mcp") or "").rstrip("/"),
         log_level=(_env("WSDC_MCP_LOG_LEVEL", "INFO") or "INFO").upper(),
+        usage_log=Path(usage_log) if usage_log else None,
     )
