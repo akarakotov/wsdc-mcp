@@ -424,3 +424,17 @@ def test_dancer_card_without_a_website_has_no_link():
     from wsdc_mcp.server import dancer_card_html
 
     assert "const DANCER_URL = \"\";" in dancer_card_html(None)
+
+
+def test_same_level_note():
+    from wsdc_mcp.models import RoleStatus
+
+    def role(name, allowed):
+        return RoleStatus(role=name, has_points=True, allowed_divisions=allowed)
+
+    assert data._same_level_note([role("Leader", ["Intermediate", "Advanced"]), role("Follower", ["Novice", "Intermediate"])]) == (
+        "Intermediate is open in both roles, but at an event a dancer may enter each level's Jack & Jill in only "
+        "one role (WSDC rule 3.2.8a).")
+    assert data._same_level_note([role("Leader", ["Champions"]), role("Follower", ["Advanced", "All-Stars"])]) is None
+    assert "Newcomer and Novice are open" in data._same_level_note(
+        [role("Leader", ["Newcomer", "Novice"]), role("Follower", ["Newcomer", "Novice"])])

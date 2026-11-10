@@ -173,6 +173,18 @@ def _allowed_divisions(row: dict[str, Any], role: str) -> list[str]:
     return [div for div, suffix in DIVISION_SUFFIX.items() if row.get(f"{prefix}_available_{suffix}")]
 
 
+def _same_level_note(roles: list[RoleStatus]) -> str | None:
+    """WSDC rule 3.2.8a: a level open in both roles can be danced in only one of them at an event."""
+    if len(roles) != 2:
+        return None
+    shared = [d for d in roles[0].allowed_divisions if d in roles[1].allowed_divisions]
+    if not shared:
+        return None
+    levels = " and ".join(shared)
+    return (f"{levels} {'is' if len(shared) == 1 else 'are'} open in both roles, but at an event a dancer may enter "
+            f"each level's Jack & Jill in only one role (WSDC rule 3.2.8a).")
+
+
 def _role_points_total(row: dict[str, Any], role: str) -> int:
     prefix = ROLE_PREFIX[role]
     return sum(int(row.get(f"{prefix}_{suffix}_points") or 0) for suffix in DIVISION_SUFFIX.values())
@@ -359,6 +371,7 @@ async def get_dancer_profile(db: Database, wsdc_id: int) -> DancerProfile:
             for r in (primary, other)
         ]
         note = "No skill-level Jack & Jill points; points come only from other divisions (e.g. Masters)."
+    note = " ".join(x for x in (note, _same_level_note(roles)) if x) or None
 
     return DancerProfile(
         wsdc_id=wsdc_id,
